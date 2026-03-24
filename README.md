@@ -96,7 +96,7 @@ Multi-turn, open-ended within a 48-step window. The agent makes multiple tool ca
 
 ## Safety
 
-This is a simulated environment with no real-world impact. No real aircraft, airports, or passengers are affected.
+This is a simulated environment with no real-world impact.
 
 ## Parameter Sources
 
