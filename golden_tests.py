@@ -872,26 +872,54 @@ class TestAircraftData:
 
 class TestWakeSeparation:
 
-    def test_wake_violation_detected_on_same_clock_sequencing(self):
-        """Two flights sequenced on the same runway at the same clock time
-        should trigger a wake separation violation."""
+    def test_two_large_same_runway_same_step_no_violation(self):
+        """Two LARGE flights on the same runway in a 5-min step should NOT
+        violate wake separation (2 min sep fits within 5 min window)."""
         sim = _make_sim("clear_day", seed=0)
         _activate_and_advance(sim, steps=3)
 
-        arrivals = [f for f in sim.flights.values()
-                    if f.activated and f.phase in (FlightPhase.APPROACHING, FlightPhase.HOLDING)]
-        assert len(arrivals) >= 2, "Need at least 2 active arrivals"
+        large_arrivals = [f for f in sim.flights.values()
+                          if f.activated
+                          and f.phase in (FlightPhase.APPROACHING, FlightPhase.HOLDING)
+                          and f.wake == WakeCategory.LARGE]
+        assert len(large_arrivals) >= 2, "Need at least 2 LARGE arrivals"
 
-        f1, f2 = arrivals[0], arrivals[1]
+        f1, f2 = large_arrivals[0], large_arrivals[1]
         arr_rwy = sim.active_config.arrival_runways[0]
 
         sim.sequence_flight(f1.id, arr_rwy)
         violations_before = sim.metrics.safety_violations
         sim.sequence_flight(f2.id, arr_rwy)
-        violations_after = sim.metrics.safety_violations
 
-        assert violations_after > violations_before, (
-            "Two flights sequenced at same time on same runway should violate wake separation"
+        assert sim.metrics.safety_violations == violations_before, (
+            "Two LARGE flights in a 5-min step should fit with 2-min separation"
+        )
+
+    def test_wake_violation_when_step_capacity_exceeded(self):
+        """Enough flights on one runway in a single step should trigger a
+        violation when cumulative separation exceeds step duration."""
+        sim = _make_sim("clear_day", seed=0)
+        _activate_and_advance(sim, steps=5)
+
+        arrivals = [f for f in sim.flights.values()
+                    if f.activated
+                    and f.phase in (FlightPhase.APPROACHING, FlightPhase.HOLDING)
+                    and f.wake == WakeCategory.LARGE]
+
+        # Need 4 LARGE flights: sep 2+2+2=6 min > 5 min step → violation on 4th
+        if len(arrivals) < 4:
+            pytest.skip("Need at least 4 LARGE arrivals")
+
+        arr_rwy = sim.active_config.arrival_runways[0]
+        for f in arrivals[:3]:
+            sim.sequence_flight(f.id, arr_rwy)
+
+        violations_before = sim.metrics.safety_violations
+        sim.sequence_flight(arrivals[3].id, arr_rwy)
+
+        assert sim.metrics.safety_violations > violations_before, (
+            "4th LARGE flight on same runway in 5-min step should violate "
+            "(cumulative 6 min separation > 5 min step)"
         )
 
     def test_no_wake_violation_with_time_gap(self):
@@ -1132,7 +1160,9 @@ class TestRewardComponents:
             sim_none.advance()
         reward_none = sim_none.compute_final_reward()
 
-        # Smart agent: respect wake separation, assign gates
+        # Smart agent: respect wake separation, assign gates.
+        # Uses virtual timestamps: checks that the next op's earliest time
+        # (last_virtual_time + required_sep) fits within the current step.
         sim_smart = _make_sim("clear_day", seed=0)
         for step in range(48):
             arr_rwys = list(sim_smart.active_config.arrival_runways)
@@ -1140,7 +1170,12 @@ class TestRewardComponents:
                 if f.activated and f.phase in (FlightPhase.APPROACHING, FlightPhase.HOLDING):
                     for rwy in arr_rwys:
                         last = sim_smart.runway_last_op.get(rwy)
-                        if last is None or (sim_smart.clock - last[0]) >= get_wake_separation(last[1], f.wake):
+                        if last is None:
+                            fits = True
+                        else:
+                            earliest = last[0] + get_wake_separation(last[1], f.wake)
+                            fits = earliest <= sim_smart.clock + sim_smart.step_duration
+                        if fits:
                             sim_smart.sequence_flight(f.id, rwy)
                             for gid, gate in GATES.items():
                                 if gate.max_adg.value >= f.adg.value:
@@ -1156,7 +1191,12 @@ class TestRewardComponents:
                     if sim_smart.ground_stop_until <= sim_smart.clock:
                         for rwy in dep_rwys:
                             last = sim_smart.runway_last_op.get(rwy)
-                            if last is None or (sim_smart.clock - last[0]) >= get_wake_separation(last[1], f.wake):
+                            if last is None:
+                                fits = True
+                            else:
+                                earliest = last[0] + get_wake_separation(last[1], f.wake)
+                                fits = earliest <= sim_smart.clock + sim_smart.step_duration
+                            if fits:
                                 sim_smart.sequence_flight(f.id, rwy)
                                 break
 

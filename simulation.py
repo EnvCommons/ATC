@@ -355,8 +355,16 @@ class ATCSimulation:
             flight.phase = FlightPhase.PUSHBACK
             flight.phase_timer = PUSHBACK_DURATION
 
-        # Record operation on runway
-        self.runway_last_op[runway_id] = (self.clock, flight.wake)
+        # Record operation on runway with virtual sub-step timestamp.
+        # Multiple ops on the same runway within one step are modeled as
+        # spaced by the required wake separation interval.
+        last = self.runway_last_op.get(runway_id)
+        if last is not None and last[0] >= self.clock:
+            required_sep = get_wake_separation(last[1], flight.wake)
+            op_time = last[0] + required_sep
+        else:
+            op_time = self.clock
+        self.runway_last_op[runway_id] = (op_time, flight.wake)
         self.step_runway_ops[runway_id] = (
             self.step_runway_ops.get(runway_id, 0) + 1
         )
@@ -533,11 +541,14 @@ class ATCSimulation:
     def advance(self) -> dict:
         """Advance simulation by one time step.
 
+        Events and runway ops accumulated from tool calls between advance()
+        calls are preserved so that the observation includes them.
+
         Returns observation dict.
         """
         self.metrics.begin_step()
-        self.step_events = []
-        self.step_runway_ops = {}
+        # Keep step_events from tool calls (sequence_flight, etc.);
+        # new events from this advance are appended to the same list.
 
         # Update weather and wind
         if self.step_count < len(self.weather_timeline):
@@ -562,7 +573,7 @@ class ATCSimulation:
         # Process all flight phase transitions
         self._process_flights()
 
-        # Check capacity
+        # Check capacity (uses ops accumulated since last advance)
         self._check_capacity()
 
         # Check connections
@@ -572,7 +583,13 @@ class ATCSimulation:
         self.clock += self.step_duration
         self.step_count += 1
 
-        return self.get_observation()
+        obs = self.get_observation()
+
+        # Clear for next decision window
+        self.step_events = []
+        self.step_runway_ops = {}
+
+        return obs
 
     def _activate_flights(self) -> None:
         """Activate flights whose scheduled time has arrived."""
@@ -786,6 +803,10 @@ class ATCSimulation:
     ) -> Optional[str]:
         """Check wake separation for a flight on a runway.
 
+        Multiple flights sequenced on the same runway within a step are
+        modeled as spaced by the required wake separation.  A violation
+        occurs only when the cumulative spacing exceeds the step window.
+
         Returns error string if violation, None if OK.
         """
         last = self.runway_last_op.get(runway_id)
@@ -794,15 +815,18 @@ class ATCSimulation:
 
         last_time, last_wake = last
         required_sep = get_wake_separation(last_wake, flight.wake)
-        actual_sep = self.clock - last_time
 
-        if actual_sep < required_sep:
-            return (
-                f"Wake separation violation on {runway_id}: "
-                f"{actual_sep}min < {required_sep}min required "
-                f"({last_wake.value} -> {flight.wake.value})"
-            )
-        return None
+        # Earliest this flight can operate with proper separation
+        earliest = last_time + required_sep
+
+        if earliest <= self.clock + self.step_duration:
+            return None
+
+        return (
+            f"Wake separation violation on {runway_id}: "
+            f"cannot fit {required_sep}min separation within step "
+            f"({last_wake.value} -> {flight.wake.value})"
+        )
 
     def _check_capacity(self) -> None:
         """Check if runway operations this step exceed capacity."""

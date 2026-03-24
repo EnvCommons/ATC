@@ -134,12 +134,12 @@ TERMINALS & GATES (60 total):
 
 == YOUR OBJECTIVES ==
 
-You must balance five objectives (weights for final score):
-  1. THROUGHPUT (30%): Maximize flights processed (landed + departed)
-  2. DELAY REDUCTION (25%): Minimize total delay minutes
-  3. PASSENGER CONNECTIONS (20%): Prevent missed connections (MCT = 60 min)
-  4. FUEL EFFICIENCY (15%): Minimize excess fuel burn (especially holds)
-  5. SAFETY (10% + 0.5x multiplier): Zero wake separation violations
+You will be judged on the following criteria:
+  - THROUGHPUT: Maximize flights processed (landed + departed)
+  - DELAY REDUCTION: Minimize total delay minutes
+  - PASSENGER CONNECTIONS: Prevent missed connections (MCT = 60 min)
+  - FUEL EFFICIENCY: Minimize excess fuel burn (especially holds)
+  - SAFETY: Zero wake separation violations
 
 == TOOLS AVAILABLE ==
 
@@ -176,16 +176,6 @@ CONNECTIONS: If an arrival's delay makes MCT (60 min) impossible for
 
 WEATHER CAPACITY IMPACT:
   CLEAR: 100% | MVFR: 85% | IFR: 67% | LOW_IFR: 50% | THUNDERSTORM: 25%
-
-== STRATEGY HINTS ==
-
-- Prioritize EMERGENCY flights immediately (large bonus for quick handling)
-- Match runway config to wind direction for maximum capacity
-- Pre-assign gates to arrivals early to avoid taxi delays
-- In bad weather, consider holding some flights and using ground stops
-- Watch fuel levels on holding flights - divert before critical
-- Manage connections: sequence connecting arrivals before their departures leave
-- Use advance_time() to step the simulation forward after making decisions
 
 == CURRENT STATUS ==
 
