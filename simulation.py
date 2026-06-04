@@ -46,6 +46,13 @@ APPROACH_TO_FINAL_DURATION = 5   # time on final approach
 LANDING_ROLLOUT_DURATION = 2     # runway occupancy after touchdown
 PUSHBACK_DURATION = 5            # pushback from gate
 
+# Sentinel offset used to mark a gate as held by a departure "indefinitely"
+# (until the aircraft physically pushes back, at which point the slot is
+# cleared to None — it is never freed by the clock reaching this time). It is
+# an internal marker, NOT a real scheduled availability time, so it must never
+# be rendered into user-visible text as a T+ timestamp.
+GATE_HELD_INDEFINITELY_OFFSET = 9999
+
 
 class ATCSimulation:
     """Discrete-event ATC simulation engine.
@@ -414,9 +421,16 @@ class ATCSimulation:
         if occ is not None:
             occ_fid, avail_at = occ
             if avail_at > self.clock:
+                # A departure holding a gate is marked with the indefinite-hold
+                # sentinel (clock + GATE_HELD_INDEFINITELY_OFFSET), which is not
+                # a real availability time.
+                if avail_at - self.clock >= GATE_HELD_INDEFINITELY_OFFSET:
+                    when = "until its departure pushes back"
+                else:
+                    when = f"until T+{avail_at}"
                 return {
                     "success": False,
-                    "error": f"Gate {gate_id} occupied by {occ_fid} until T+{avail_at}",
+                    "error": f"Gate {gate_id} occupied by {occ_fid} {when}",
                 }
 
         flight.assigned_gate = gate_id
@@ -622,7 +636,9 @@ class ATCSimulation:
                 if occ is None or occ[1] <= self.clock:
                     flight.assigned_gate = gid
                     # Departure occupies gate until it pushes back
-                    self.gate_occupancy[gid] = (flight.id, self.clock + 9999)
+                    self.gate_occupancy[gid] = (
+                        flight.id, self.clock + GATE_HELD_INDEFINITELY_OFFSET
+                    )
                     return True
         return False
 
