@@ -46,7 +46,9 @@ Each task runs for 48 time steps of 5 minutes each (4 hours of simulated operati
 
 ## Reward Structure
 
-Dense per-step rewards on each `advance_time()` call, plus a final normalized episode reward in [0, 1].
+Dense per-step rewards on each `advance_time()` call that **sum exactly to the final normalized episode reward in [0, 1]**.
+
+The per-step reward is a telescoping decomposition of the score: each step returns the change in the normalized episode score (the "score if the shift ended now"), so individual step rewards may be negative, but summing every step reward over a rollout yields exactly the final score at the point the rollout stopped — even if it never reached a terminal state. This is potential-based reward shaping, so the dense signal is policy-invariant relative to the sparse final score, and there is no separate terminal reward to double-count. The `end_shift()` / final-step emissions are the last delta, not a repeated full score.
 
 **Final reward** is a weighted combination of five objectives:
 

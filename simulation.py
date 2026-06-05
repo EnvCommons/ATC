@@ -103,6 +103,11 @@ class ATCSimulation:
         # Metrics
         self.metrics = Metrics()
 
+        # Potential for telescoping step rewards (see compute_step_reward).
+        # Baseline 0.0: before the shift starts the "score so far" is 0, so the
+        # per-step deltas sum exactly to the normalized final score.
+        self._prev_potential = 0.0
+
         # Connection tracking: set of (arrival_id, departure_id) pairs
         self.connections: set[tuple[str, str]] = set()
         self.missed_connection_pairs: set[tuple[str, str]] = set()
@@ -287,6 +292,7 @@ class ATCSimulation:
         self.current_wind = self.wind_timeline[0]
         self._auto_select_config()
         self.step_events = []
+        self._prev_potential = 0.0
         return self.get_observation()
 
     # ------------------------------------------------------------------
@@ -918,26 +924,46 @@ class ATCSimulation:
     # ------------------------------------------------------------------
 
     def compute_step_reward(self) -> float:
-        """Compute reward for the current step based on metrics delta."""
-        delta = self.metrics.step_delta()
+        """Dense per-step reward, as a telescoping decomposition of the score.
 
-        throughput = delta.flights_completed * 0.05
-        delay_pen = delta.delay_added * -0.002
-        fuel_pen = delta.hold_fuel_burned * -0.0001
-        conn_pen = delta.connections_missed * -0.1
-        safety_pen = delta.safety_violations * -1.0
-        emerg_bonus = delta.emergencies_handled * 0.5
+        Defined as the change in the normalized episode score (the potential
+        Phi) between the previous step and now: ``Phi_t - Phi_{t-1}``, where
+        ``Phi = compute_final_reward()`` evaluated on the *current* state. Two
+        consequences follow directly:
 
-        return throughput + delay_pen + fuel_pen + conn_pen + safety_pen + emerg_bonus
+          * **The rewards sum to the final score.** Summing every step reward
+            over a rollout telescopes to ``Phi_T - Phi_0``; with the baseline
+            ``Phi_0 = 0`` (set in ``__init__``/``reset``) the sum equals the
+            normalized [0, 1] score at the point the rollout stopped -- even if
+            it never reached a terminal state. So a consumer that sums per-step
+            rewards gets exactly the final reward value, with no separate
+            terminal reward to double-count.
+          * **It is policy-invariant.** This is potential-based reward shaping
+            (Ng, Harada & Russell, 1999) with gamma = 1, so the dense signal
+            cannot change the optimal policy relative to the sparse final score.
+
+        Has the side effect of advancing the stored potential, so it must be
+        called exactly once per advanced step (it is, from advance_time)."""
+        potential = self.compute_final_reward()
+        step_reward = potential - self._prev_potential
+        self._prev_potential = potential
+        return step_reward
 
     def compute_final_reward(self) -> float:
-        """Compute normalized final episode reward in [0, 1]."""
+        """Compute normalized episode score in [0, 1] for the current state.
+
+        Doubles as the potential function for compute_step_reward, so it is
+        well-defined mid-episode ("the score if the shift ended right now").
+        """
         m = self.metrics
         total_flights = sum(
             1 for f in self.flights.values() if f.activated
         )
         if total_flights == 0:
-            return 0.5  # no flights = neutral
+            # No flights have been activated yet (warmup) or the scenario has
+            # none: score 0 so the potential baseline starts clean and the
+            # step rewards telescope exactly to the final score.
+            return 0.0
 
         # Throughput: fraction of activated flights completed
         throughput_score = m.flights_completed / max(total_flights, 1)
