@@ -326,6 +326,11 @@ Begin managing the airport. Review the status, then make decisions and advance t
             return self._done_response()
 
         obs = self.sim.advance()
+        # Telescoping per-step reward (Phi_t - Phi_{t-1}); see
+        # ATCSimulation.compute_step_reward. The running sum equals the current
+        # normalized score, so we report it as the live score and the final
+        # reward is just the last delta -- never a separate full-score emission
+        # (which would double-count against the summed step rewards).
         step_reward = self.sim.compute_step_reward()
         self.step_rewards.append(step_reward)
 
@@ -333,16 +338,15 @@ Begin managing the airport. Review the status, then make decisions and advance t
 
         if self.sim.step_count >= self.sim.max_steps:
             self.episode_done = True
-            final_reward = self.sim.compute_final_reward()
             text = self._format_observation(obs)
             text += f"\n\n=== SHIFT COMPLETE ===\n"
-            text += f"Final Reward: {final_reward:.4f}\n"
+            text += f"Final Reward: {cumulative:.4f}\n"
             text += self._format_final_summary()
 
             return ToolOutput(
                 blocks=[TextBlock(text=text)],
-                metadata={**obs, "final_reward": final_reward},
-                reward=final_reward,
+                metadata={**obs, "final_reward": cumulative, "step_reward": step_reward},
+                reward=step_reward,
                 finished=True,
             )
 
@@ -364,15 +368,20 @@ Begin managing the airport. Review the status, then make decisions and advance t
             return self._done_response()
 
         self.episode_done = True
-        final_reward = self.sim.compute_final_reward()
+        # Residual telescoping delta since the last advance (0 if the agent
+        # just advanced); ending early does not advance the sim, so the summed
+        # step rewards already equal the current normalized score reported here.
+        step_reward = self.sim.compute_step_reward()
+        self.step_rewards.append(step_reward)
+        final_reward = sum(self.step_rewards)
         text = f"Shift ended early at step {self.sim.step_count}/{self.sim.max_steps}.\n"
         text += f"Final Reward: {final_reward:.4f}\n"
         text += self._format_final_summary()
 
         return ToolOutput(
             blocks=[TextBlock(text=text)],
-            metadata={"final_reward": final_reward, "steps_completed": self.sim.step_count},
-            reward=final_reward,
+            metadata={"final_reward": final_reward, "step_reward": step_reward, "steps_completed": self.sim.step_count},
+            reward=step_reward,
             finished=True,
         )
 

@@ -674,7 +674,10 @@ class TestLifecycle:
 
         assert env.episode_done
         assert result.reward is not None
-        assert 0.0 <= result.reward <= 1.0
+        # Per-step rewards are a telescoping delta (Phi_t - Phi_{t-1}) and may be
+        # negative; the bounded [0,1] score is the summed total, surfaced as
+        # final_reward in metadata.
+        assert 0.0 <= result.metadata["final_reward"] <= 1.0
         await env.teardown()
 
     @pytest.mark.asyncio
@@ -690,7 +693,9 @@ class TestLifecycle:
         result = await env.end_shift(EmptyParams())
         assert result.finished
         assert result.reward is not None
-        assert 0.0 <= result.reward <= 1.0
+        # final_reward is the normalized [0,1] score at the point of stopping;
+        # result.reward is the residual telescoping delta (~0 right after an advance).
+        assert 0.0 <= result.metadata["final_reward"] <= 1.0
         await env.teardown()
 
     @pytest.mark.asyncio
