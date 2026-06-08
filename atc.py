@@ -177,6 +177,8 @@ WAKE TURBULENCE SEPARATION (same runway, consecutive ops):
   HEAVY -> LARGE/SMALL: 3 min |  HEAVY -> HEAVY: 2 min
   Same category or smaller behind larger: 2 min minimum
   VIOLATION = the heaviest penalty (each subtracts ~0.20 from the score)
+  The RUNWAY QUEUES section of the status shows the last op (wake + time) on
+  each active runway — use it to space your clearances and avoid violations.
 
 GATE COMPATIBILITY (Aircraft Design Group):
   ADG III gates (Terminal A): CRJ-900, E175 (regional)
@@ -460,6 +462,23 @@ Begin managing the airport. Review the status, then make decisions and advance t
         # Ground stop
         if obs["ground_stop"]:
             lines.append(f"GROUND STOP: Active until T+{obs['ground_stop_until']}")
+
+        # Runway queues (so wake separation can be planned before sequencing)
+        if obs.get("runway_status"):
+            lines.append("\nRUNWAY QUEUES (plan wake separation before sequencing):")
+            for r in obs["runway_status"]:
+                if r["last_op_wake"] is None:
+                    lines.append(f"  {r['runway']:5s} ({r['role']}): clear")
+                else:
+                    lines.append(
+                        f"  {r['runway']:5s} ({r['role']}): last op {r['last_op_wake']} "
+                        f"at T+{r['last_op_time']}, {r['ops_this_step']} op(s) this step "
+                        f"-- next op needs wake separation after it"
+                    )
+            lines.append(
+                f"  (this step's window ends at T+{obs['step_window_end']}; an op "
+                f"only fits if last-op-time + required separation lands within it)"
+            )
 
         # Events
         if obs["events"]:

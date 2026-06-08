@@ -1070,6 +1070,34 @@ class ATCSimulation:
             ):
                 connections_at_risk.append((arr, dep))
 
+        # Runway queue status: the last operation still constraining each active
+        # runway this step, so the agent can plan wake separation BEFORE
+        # sequencing (rather than discovering a violation via the reward later).
+        # An op only constrains if its (possibly virtual sub-step) time is still
+        # within reach of this step; max wake separation (4 min) < step (5 min),
+        # so an op from a fully-prior step never blocks a new clearance.
+        seen_rwy: set[str] = set()
+        runway_status = []
+        for rwy in (list(self.active_config.arrival_runways)
+                    + list(self.active_config.departure_runways)):
+            if rwy in seen_rwy:
+                continue
+            seen_rwy.add(rwy)
+            roles = []
+            if rwy in self.active_config.arrival_runways:
+                roles.append("arrival")
+            if rwy in self.active_config.departure_runways:
+                roles.append("departure")
+            last = self.runway_last_op.get(rwy)
+            constrains = last is not None and last[0] >= self.clock
+            runway_status.append({
+                "runway": rwy,
+                "role": "/".join(roles),
+                "last_op_wake": last[1].value if constrains else None,
+                "last_op_time": last[0] if constrains else None,
+                "ops_this_step": self.step_runway_ops.get(rwy, 0),
+            })
+
         return {
             "step": self.step_count,
             "max_steps": self.max_steps,
@@ -1080,6 +1108,8 @@ class ATCSimulation:
             "config_desc": self.active_config.description,
             "arr_runways": list(self.active_config.arrival_runways),
             "dep_runways": list(self.active_config.departure_runways),
+            "runway_status": runway_status,
+            "step_window_end": self.clock + self.step_duration,
             "arr_capacity_per_step": arr_cap,
             "dep_capacity_per_step": dep_cap,
             "ground_stop": self.ground_stop_until > self.clock,
