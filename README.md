@@ -46,21 +46,25 @@ Each task runs for 48 time steps of 5 minutes each (4 hours of simulated operati
 
 ## Reward Structure
 
-Dense per-step rewards on each `advance_time()` call that **sum exactly to the final normalized episode reward in [0, 1]**.
+Dense per-step rewards on each `advance_time()` call that **sum exactly to the final episode score in [-1, 1]**.
 
-The per-step reward is a telescoping decomposition of the score: each step returns the change in the normalized episode score (the "score if the shift ended now"), so individual step rewards may be negative, but summing every step reward over a rollout yields exactly the final score at the point the rollout stopped — even if it never reached a terminal state. This is potential-based reward shaping, so the dense signal is policy-invariant relative to the sparse final score, and there is no separate terminal reward to double-count. The `end_shift()` / final-step emissions are the last delta, not a repeated full score.
+The per-step reward is a telescoping decomposition of the score: each step returns the change in the episode score (the "score if the shift ended now"), so individual step rewards may be negative, but summing every step reward over a rollout yields exactly the final score at the point the rollout stopped — even if it never reached a terminal state. This is potential-based reward shaping, so the dense signal is policy-invariant relative to the sparse final score, and there is no separate terminal reward to double-count. The `end_shift()` / final-step emissions are the last delta, not a repeated full score.
 
-**Final reward** is a weighted combination of five objectives:
+**Final score** is one credit (throughput) minus four penalties (delay, connections, fuel, safety), each a fraction in `[0, 1]` anchored at 0 for the empty state. The score lives in `[-1, 1]`: empty/neutral = 0, a perfect shift = +1, a do-nothing or disaster shift = -1.
 
-| Component | Weight | Metric |
-|-----------|--------|--------|
-| Throughput | 30% | Fraction of flights completed (landed + departed) |
-| Delay Reduction | 25% | 1 - (avg_delay / 120 min), clamped to [0,1] |
-| Passenger Connections | 20% | Fraction of connections preserved |
-| Fuel Efficiency | 15% | 1 - (excess_fuel / max_excess), clamped |
-| Safety | 10% | 1.0 if zero violations, degrades by 0.2 per violation |
+```
+score = throughput_frac − ( 0.25·delay + 0.20·connections + 0.15·fuel + 0.40·safety )
+```
 
-**Safety override**: Any wake separation violation applies a 0.5x multiplier to the entire final reward.
+| Term | Sign | Weight | Metric |
+|------|------|--------|--------|
+| Throughput | credit | up to +1 | fraction of all scheduled flights completed (landed + departed) |
+| Delay | penalty | 0.25 | `total_delay / (flights × 120 min)`, clamped to [0,1] |
+| Connections | penalty | 0.20 | fraction of connections missed |
+| Fuel | penalty | 0.15 | `excess_fuel / max_excess`, clamped to [0,1] |
+| Safety | penalty | 0.40 | `min(1, 0.5 × wake violations)` |
+
+**Safety** is the heaviest penalty and is additive: one wake violation subtracts ≈0.20, two or more ≈0.40. (Earlier versions applied a multiplicative 0.5× override; that has been replaced so the penalty is local and bounded.)
 
 No LLM grader is used; all rewards are computed algorithmically from simulation state.
 

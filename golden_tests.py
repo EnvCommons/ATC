@@ -600,7 +600,7 @@ class TestReward:
         for _ in range(48):
             sim.advance()
         final = sim.compute_final_reward()
-        assert 0.0 <= final <= 1.0, f"Final reward {final} out of [0,1] range"
+        assert -1.0 <= final <= 1.0, f"Final reward {final} out of [-1,1] range"
 
     def test_final_reward_multiple_scenarios(self):
         """Final reward should be in [0,1] for all scenarios."""
@@ -609,7 +609,7 @@ class TestReward:
             for _ in range(48):
                 sim.advance()
             final = sim.compute_final_reward()
-            assert 0.0 <= final <= 1.0, (
+            assert -1.0 <= final <= 1.0, (
                 f"Scenario {scenario}: final reward {final} out of range"
             )
 
@@ -636,9 +636,14 @@ class TestReward:
 
         sim.metrics.safety_violations = 2
         reward_violated = sim.compute_final_reward()
-        # Safety violations should significantly reduce reward
+        # Safety is an additive penalty now: 2 violations -> viol_frac=1.0 ->
+        # subtracts the full safety weight (0.40), clamped at -1 (no 0.5x).
         assert reward_violated < reward_clean, (
             f"Safety violation reward {reward_violated} should be < clean {reward_clean}"
+        )
+        expected_drop = min(0.40, reward_clean + 1.0)  # accounts for clamp to -1
+        assert abs((reward_clean - reward_violated) - expected_drop) < 1e-9, (
+            f"2 violations should subtract ~0.40 (clamped), got {reward_clean - reward_violated:.4f}"
         )
 
     def test_no_action_low_reward(self):
@@ -647,9 +652,9 @@ class TestReward:
         for _ in range(48):
             sim.advance()
         final = sim.compute_final_reward()
-        # With no actions, flights just auto-hold and delays pile up
-        # Should be low but not necessarily zero
-        assert final < 0.6, f"No-action reward {final} should be low"
+        # With no actions, no flights complete (zero throughput credit) while
+        # delay/fuel penalties pile up, so the score goes negative.
+        assert final < 0.0, f"No-action reward {final} should be negative"
 
 
 # ===========================================================================
@@ -675,9 +680,9 @@ class TestLifecycle:
         assert env.episode_done
         assert result.reward is not None
         # Per-step rewards are a telescoping delta (Phi_t - Phi_{t-1}) and may be
-        # negative; the bounded [0,1] score is the summed total, surfaced as
+        # negative; the bounded [-1,1] score is the summed total, surfaced as
         # final_reward in metadata.
-        assert 0.0 <= result.metadata["final_reward"] <= 1.0
+        assert -1.0 <= result.metadata["final_reward"] <= 1.0
         await env.teardown()
 
     @pytest.mark.asyncio
@@ -693,9 +698,9 @@ class TestLifecycle:
         result = await env.end_shift(EmptyParams())
         assert result.finished
         assert result.reward is not None
-        # final_reward is the normalized [0,1] score at the point of stopping;
+        # final_reward is the [-1,1] score at the point of stopping;
         # result.reward is the residual telescoping delta (~0 right after an advance).
-        assert 0.0 <= result.metadata["final_reward"] <= 1.0
+        assert -1.0 <= result.metadata["final_reward"] <= 1.0
         await env.teardown()
 
     @pytest.mark.asyncio
@@ -1216,9 +1221,14 @@ class TestRewardComponents:
             f"Smart agent should have zero wake violations, got {sim_smart.metrics.safety_violations}"
         )
 
-    def test_final_reward_weights_sum_to_one(self):
-        """The five reward component weights should sum to 1.0."""
-        weights = [0.30, 0.25, 0.20, 0.15, 0.10]
+    def test_penalty_weights_sum_to_one(self):
+        """The four penalty weights should sum to 1.0 (-> penalty term in [0,1])."""
+        weights = [
+            ATCSimulation._DELAY_W,
+            ATCSimulation._CONN_W,
+            ATCSimulation._FUEL_W,
+            ATCSimulation._SAFETY_W,
+        ]
         assert abs(sum(weights) - 1.0) < 1e-9
 
     def test_safety_multiplier_effect(self):
@@ -1247,11 +1257,12 @@ class TestRewardComponents:
         assert dirty < clean, (
             f"Violated ({dirty:.4f}) should be less than clean ({clean:.4f})"
         )
-        if clean > 0:
-            ratio = dirty / clean
-            assert ratio < 0.6, (
-                f"Safety multiplier should reduce by ~50%, ratio={ratio:.3f}"
-            )
+        # Additive safety: 2 violations subtract the full safety weight (0.40),
+        # clamped at -1 (the old 0.5x multiplier is gone).
+        expected_drop = min(0.40, clean + 1.0)
+        assert abs((clean - dirty) - expected_drop) < 1e-9, (
+            f"2 violations should subtract ~0.40 (clamped), got {clean - dirty:.4f}"
+        )
 
     def test_throughput_final_reward_in_range(self):
         """Final reward should always be in [0, 1]."""
@@ -1260,7 +1271,7 @@ class TestRewardComponents:
             for _ in range(48):
                 sim.advance()
             final = sim.compute_final_reward()
-            assert 0.0 <= final <= 1.0, (
+            assert -1.0 <= final <= 1.0, (
                 f"{scenario}: final reward {final} out of range"
             )
 
