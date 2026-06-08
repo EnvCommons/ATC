@@ -118,6 +118,14 @@ class ATCSimulation:
         # Generate flights
         self._generate_flight_schedule(task_spec.flight_count)
 
+        # Fixed reward denominator: flights scheduled to activate this shift.
+        # Computed once (the schedule never changes) so the throughput/delay
+        # fractions don't twitch as flights activate over the episode.
+        self._total_scheduled = sum(
+            1 for f in self.flights.values()
+            if f.scheduled_time < self.max_steps * self.step_duration
+        )
+
         # Set initial config based on wind
         self._auto_select_config()
 
@@ -293,6 +301,10 @@ class ATCSimulation:
         self._auto_select_config()
         self.step_events = []
         self._prev_potential = 0.0
+        self._total_scheduled = sum(
+            1 for f in self.flights.values()
+            if f.scheduled_time < self.max_steps * self.step_duration
+        )
         return self.get_observation()
 
     # ------------------------------------------------------------------
@@ -934,10 +946,10 @@ class ATCSimulation:
           * **The rewards sum to the final score.** Summing every step reward
             over a rollout telescopes to ``Phi_T - Phi_0``; with the baseline
             ``Phi_0 = 0`` (set in ``__init__``/``reset``) the sum equals the
-            normalized [0, 1] score at the point the rollout stopped -- even if
-            it never reached a terminal state. So a consumer that sums per-step
-            rewards gets exactly the final reward value, with no separate
-            terminal reward to double-count.
+            [-1, 1] score at the point the rollout stopped -- even if it never
+            reached a terminal state. So a consumer that sums per-step rewards
+            gets exactly the final reward value, with no separate terminal
+            reward to double-count.
           * **It is policy-invariant.** This is potential-based reward shaping
             (Ng, Harada & Russell, 1999) with gamma = 1, so the dense signal
             cannot change the optimal policy relative to the sparse final score.
@@ -949,63 +961,56 @@ class ATCSimulation:
         self._prev_potential = potential
         return step_reward
 
+    # Penalty weights (sum to 1.0); the safety-severity dial lives here and in
+    # the viol_frac slope below. Safety is dominant and additive -- a violation
+    # subtracts a bounded amount at the step it happens, rather than a non-local
+    # retroactive 0.5x multiplier on the whole score.
+    _DELAY_W = 0.25
+    _CONN_W = 0.20
+    _FUEL_W = 0.15
+    _SAFETY_W = 0.40
+
     def compute_final_reward(self) -> float:
-        """Compute normalized episode score in [0, 1] for the current state.
+        """Compute the episode score in [-1, 1] for the current state.
+
+        Penalty frame: a single credit (throughput, "do the job") minus four
+        penalties (delay, connections, fuel, safety -- "avoid harm"), each a
+        fraction in [0, 1] anchored at 0 for the empty state. Throughput in
+        [0, 1] minus penalty-weights-sum-to-1 means the score lives in [-1, 1]
+        with the empty state at exactly 0 (no startup spike, no free reward).
 
         Doubles as the potential function for compute_step_reward, so it is
         well-defined mid-episode ("the score if the shift ended right now").
         """
         m = self.metrics
-        total_flights = sum(
-            1 for f in self.flights.values() if f.activated
-        )
-        if total_flights == 0:
-            # No flights have been activated yet (warmup) or the scenario has
-            # none: score 0 so the potential baseline starts clean and the
-            # step rewards telescope exactly to the final score.
+        n = self._total_scheduled
+        if n == 0:
+            # No flights this shift: score 0 so the potential baseline starts
+            # clean and the step rewards telescope exactly to the final score.
             return 0.0
 
-        # Throughput: fraction of activated flights completed
-        throughput_score = m.flights_completed / max(total_flights, 1)
+        # Credit: fraction of all scheduled flights completed (landed + departed)
+        throughput_frac = m.flights_completed / n
 
-        # Delay: 1 - (avg_delay / 120), clamped
-        if m.flights_completed > 0:
-            avg_delay = m.total_delay / m.flights_completed
-        else:
-            avg_delay = 120
-        delay_score = max(0.0, 1.0 - avg_delay / 120.0)
+        # Penalties: each a fraction in [0, 1] that starts at 0 and grows as
+        # things go wrong. Fixed denominators (n, max_possible_excess,
+        # total_connections) so the fractions don't twitch as flights activate.
+        delay_frac = min(1.0, m.total_delay / (n * 120.0))
+        conn_frac = (
+            m.missed_connections / m.total_connections
+            if m.total_connections > 0 else 0.0
+        )
+        fuel_frac = min(1.0, m.excess_fuel / max(m.max_possible_excess, 1.0))
+        viol_frac = min(1.0, 0.5 * m.safety_violations)
 
-        # Connections: fraction preserved
-        if m.total_connections > 0:
-            conn_score = max(0.0, 1.0 - m.missed_connections / m.total_connections)
-        else:
-            conn_score = 1.0
-
-        # Fuel efficiency
-        fuel_score = max(
-            0.0, 1.0 - m.excess_fuel / max(m.max_possible_excess, 1.0)
+        score = throughput_frac - (
+            self._DELAY_W * delay_frac
+            + self._CONN_W * conn_frac
+            + self._FUEL_W * fuel_frac
+            + self._SAFETY_W * viol_frac
         )
 
-        # Safety
-        if m.safety_violations == 0:
-            safety_score = 1.0
-        else:
-            safety_score = max(0.0, 1.0 - m.safety_violations * 0.2)
-
-        # Weighted combination
-        raw = (
-            throughput_score * 0.30
-            + delay_score * 0.25
-            + conn_score * 0.20
-            + fuel_score * 0.15
-            + safety_score * 0.10
-        )
-
-        # Safety override
-        if m.safety_violations > 0:
-            raw *= 0.5
-
-        return round(max(0.0, min(1.0, raw)), 4)
+        return round(max(-1.0, min(1.0, score)), 4)
 
     # ------------------------------------------------------------------
     # Observation

@@ -141,6 +141,24 @@ You will be judged on the following criteria:
   - FUEL EFFICIENCY: Minimize excess fuel burn (especially holds)
   - SAFETY: Zero wake separation violations
 
+== SCORING ==
+
+Your score ranges from -1 (worst) to +1 (best), and is:
+
+  score = THROUGHPUT credit  -  (DELAY + CONNECTION + FUEL + SAFETY penalties)
+
+  - Credit: fraction of all scheduled flights completed (0 to +1). Completing
+    flights is the only way to earn positive score.
+  - Penalties (subtracted, each starts at 0 and grows as things go wrong):
+      delay 0.25 | missed connections 0.20 | excess fuel 0.15 | safety 0.40
+    The four penalty weights sum to 1.0, so they can pull a do-nothing shift
+    down to -1. SAFETY is the heaviest: each wake violation subtracts ~0.20
+    (two or more ≈ the full -0.40).
+
+advance_time() returns the CHANGE in this score for the step (it can be
+negative when delay/fuel/violations accrue); the per-step rewards sum to your
+final score. There is no separate end-of-shift bonus.
+
 == TOOLS AVAILABLE ==
 
 1. view_status()         - View full airport status (weather, flights, gates, connections)
@@ -158,7 +176,7 @@ WAKE TURBULENCE SEPARATION (same runway, consecutive ops):
   SUPER -> HEAVY/B757: 3 min  |  SUPER -> LARGE: 4 min
   HEAVY -> LARGE/SMALL: 3 min |  HEAVY -> HEAVY: 2 min
   Same category or smaller behind larger: 2 min minimum
-  VIOLATION = safety penalty (final reward halved if any violations)
+  VIOLATION = the heaviest penalty (each subtracts ~0.20 from the score)
 
 GATE COMPATIBILITY (Aircraft Design Group):
   ADG III gates (Terminal A): CRJ-900, E175 (regional)
@@ -172,7 +190,7 @@ FLIGHT PHASES:
   Holding:    Burns fuel at high rate; auto-diverts if fuel < 15 min
 
 CONNECTIONS: If an arrival's delay makes MCT (60 min) impossible for
-  connecting passengers, the connection is lost (-0.1 reward per miss).
+  connecting passengers, the connection is lost (adds to the connection penalty).
 
 WEATHER CAPACITY IMPACT:
   CLEAR: 100% | MVFR: 85% | IFR: 67% | LOW_IFR: 50% | THUNDERSTORM: 25%
