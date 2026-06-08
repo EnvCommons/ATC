@@ -25,6 +25,7 @@ from models import (
     WeatherCondition,
 )
 from airport import (
+    CROSSWIND_GO_AROUND_PENALTY,
     DEFAULT_CONFIG,
     GATES,
     RUNWAY_CONFIGS,
@@ -33,6 +34,7 @@ from airport import (
     get_taxi_time,
     get_wake_separation,
     go_around_probability,
+    wind_in_range,
 )
 
 
@@ -275,15 +277,9 @@ class ATCSimulation:
         for name, cfg in RUNWAY_CONFIGS.items():
             if name == "emergency":
                 continue
-            lo, hi = cfg.wind_range
-            if lo <= hi:
-                if lo <= wind <= hi:
-                    best_config = name
-                    break
-            else:  # wraps around 360
-                if wind >= lo or wind <= hi:
-                    best_config = name
-                    break
+            if wind_in_range(wind, cfg.wind_range):
+                best_config = name
+                break
 
         self.active_config_name = best_config
         self.active_config = RUNWAY_CONFIGS[best_config]
@@ -598,6 +594,15 @@ class ATCSimulation:
                     f"Wind shift: {self.current_wind}° -> {new_wind}°"
                 )
             self.current_wind = new_wind
+            # Surface the *state* (not the remedy): a config left misaligned with
+            # the wind raises go-around risk until reconfigured.
+            lo, hi = self.active_config.wind_range
+            if not wind_in_range(self.current_wind, self.active_config.wind_range):
+                self.step_events.append(
+                    f"WIND MISALIGNED: wind {self.current_wind}° is outside active "
+                    f"config {self.active_config_name} range ({lo}-{hi}°) -- arrivals "
+                    f"at elevated go-around risk"
+                )
 
         # Activate new flights
         self._activate_flights()
@@ -715,8 +720,14 @@ class ATCSimulation:
             flight.phase_timer -= dt
 
             if flight.phase_timer <= 0:
-                # Go-around check
+                # Go-around check. Weather-driven base rate, plus a crosswind/
+                # tailwind penalty when the active config is no longer aligned
+                # with the wind -- landing the "wrong way" drives missed
+                # approaches, so a stale config (not reconfigured after a wind
+                # shift) costs throughput and delay.
                 ga_prob = go_around_probability(self.current_weather)
+                if not wind_in_range(self.current_wind, self.active_config.wind_range):
+                    ga_prob = min(1.0, ga_prob + CROSSWIND_GO_AROUND_PENALTY)
                 if self.rng.random() < ga_prob:
                     go_around_runway = flight.assigned_runway  # save before clearing
                     flight.phase = FlightPhase.APPROACHING
@@ -970,6 +981,10 @@ class ATCSimulation:
     _FUEL_W = 0.15
     _SAFETY_W = 0.40
 
+    # Average delay (minutes per scheduled flight) at which the delay penalty
+    # saturates. An average of 30 min/flight is a badly-run shift.
+    _MAX_AVG_DELAY_MIN = 30.0
+
     def compute_final_reward(self) -> float:
         """Compute the episode score in [-1, 1] for the current state.
 
@@ -995,7 +1010,7 @@ class ATCSimulation:
         # Penalties: each a fraction in [0, 1] that starts at 0 and grows as
         # things go wrong. Fixed denominators (n, max_possible_excess,
         # total_connections) so the fractions don't twitch as flights activate.
-        delay_frac = min(1.0, m.total_delay / (n * 120.0))
+        delay_frac = min(1.0, m.total_delay / (n * self._MAX_AVG_DELAY_MIN))
         conn_frac = (
             m.missed_connections / m.total_connections
             if m.total_connections > 0 else 0.0
@@ -1106,6 +1121,10 @@ class ATCSimulation:
             "wind": self.current_wind,
             "config": self.active_config_name,
             "config_desc": self.active_config.description,
+            "config_wind_range": list(self.active_config.wind_range),
+            "wind_aligned": wind_in_range(
+                self.current_wind, self.active_config.wind_range
+            ),
             "arr_runways": list(self.active_config.arrival_runways),
             "dep_runways": list(self.active_config.departure_runways),
             "runway_status": runway_status,
