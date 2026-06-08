@@ -59,7 +59,7 @@ score = throughput_frac − ( 0.25·delay + 0.20·connections + 0.15·fuel + 0.4
 | Term | Sign | Weight | Metric |
 |------|------|--------|--------|
 | Throughput | credit | up to +1 | fraction of all scheduled flights completed (landed + departed) |
-| Delay | penalty | 0.25 | `total_delay / (flights × 120 min)`, clamped to [0,1] |
+| Delay | penalty | 0.25 | `total_delay / (flights × 30 min)`, clamped to [0,1] (avg 30 min/flight saturates) |
 | Connections | penalty | 0.20 | fraction of connections missed |
 | Fuel | penalty | 0.15 | `excess_fuel / max_excess`, clamped to [0,1] |
 | Safety | penalty | 0.40 | `min(1, 0.5 × wake violations)` |

@@ -302,3 +302,20 @@ GO_AROUND_WEATHER_BONUS: dict[WeatherCondition, float] = {
 def go_around_probability(weather: WeatherCondition) -> float:
     """Return probability of a go-around given current weather."""
     return GO_AROUND_BASE_PROB + GO_AROUND_WEATHER_BONUS.get(weather, 0.0)
+
+
+# Extra go-around probability when the active runway configuration is NOT aligned
+# with the current wind (i.e. wind has shifted outside the config's wind_range).
+# Models the missed approaches caused by landing with a significant tailwind /
+# crosswind. This is what gives set_runway_config (and the wind timeline) teeth:
+# leaving a stale config as the wind shifts drives up go-arounds -> delay.
+CROSSWIND_GO_AROUND_PENALTY = 0.30
+
+
+def wind_in_range(wind: int, wind_range: tuple[int, int]) -> bool:
+    """Whether a wind heading falls within a config's suitable wind_range,
+    handling ranges that wrap past 360 degrees (e.g. north_flow 270-360)."""
+    lo, hi = wind_range
+    if lo <= hi:
+        return lo <= wind <= hi
+    return wind >= lo or wind <= hi  # wraps around 360

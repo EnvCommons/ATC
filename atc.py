@@ -125,6 +125,9 @@ RUNWAY CONFIGURATIONS:
   west_flow:   Arrivals 22L, 31L | Departures 22R, 13R | Wind 200-270°
   ifr_south:   Arrivals 13R      | Departures 31L      | IFR reduced ops
   emergency:   All ops on 13R    |                      | Single runway
+  If the wind shifts outside the active config's wind band, arrivals face a
+  much higher go-around rate (tailwind/crosswind) -- use set_runway_config to
+  switch to the config whose band matches the current wind.
 
 TERMINALS & GATES (60 total):
   Terminal A: 15 gates (A1-A15)  | Max ADG III | Regional jets (CRJ-900, E175)
@@ -458,6 +461,12 @@ Begin managing the airport. Review the status, then make decisions and advance t
             f"Departures: {', '.join(obs['dep_runways'])} | "
             f"Capacity: {obs['arr_capacity_per_step']} arr/{obs['dep_capacity_per_step']} dep per step"
         )
+        if not obs.get("wind_aligned", True):
+            lo, hi = obs["config_wind_range"]
+            lines.append(
+                f"  ** WIND MISALIGNED: wind {obs['wind']}° outside config range "
+                f"({lo}-{hi}°) -- arrivals at elevated go-around risk **"
+            )
 
         # Ground stop
         if obs["ground_stop"]:
