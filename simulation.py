@@ -436,9 +436,16 @@ class ATCSimulation:
             occ_fid, avail_at = occ
             if avail_at > self.clock:
                 # A departure holding a gate is marked with the indefinite-hold
-                # sentinel (clock + GATE_HELD_INDEFINITELY_OFFSET), which is not
-                # a real availability time.
-                if avail_at - self.clock >= GATE_HELD_INDEFINITELY_OFFSET:
+                # sentinel (clock + GATE_HELD_INDEFINITELY_OFFSET) at hold time,
+                # which is not a real availability time. As the clock advances,
+                # avail_at - clock shrinks by up to the shift length, so the
+                # sentinel must be recognized by any gap far beyond a real
+                # turnaround (tens of minutes) -- NOT by the exact offset, which
+                # only matches on the hold step and otherwise leaks "T+10004".
+                held_threshold = (
+                    GATE_HELD_INDEFINITELY_OFFSET - self.max_steps * self.step_duration
+                )
+                if avail_at - self.clock >= held_threshold:
                     when = "until its departure pushes back"
                 else:
                     when = f"until T+{avail_at}"
