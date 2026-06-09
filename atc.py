@@ -170,8 +170,9 @@ final score. There is no separate end-of-shift bonus.
 4. hold_flight(flight_id)               - Put flight in holding pattern
 5. divert_flight(flight_id)             - Divert flight to alternate airport
 6. set_runway_config(config_name)       - Change runway configuration
-7. advance_time()                       - Advance simulation 5 minutes (returns step reward)
-8. end_shift()                          - End simulation early (returns final reward)
+7. issue_ground_stop(duration_minutes)  - Halt all departures for 5-60 min (e.g. severe weather or departure congestion)
+8. advance_time()                       - Advance simulation 5 minutes (returns step reward)
+9. end_shift()                          - End simulation early (returns final reward)
 
 == KEY RULES ==
 
