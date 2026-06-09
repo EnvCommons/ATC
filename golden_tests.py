@@ -30,7 +30,7 @@ from airport import (
     get_wake_separation,
     go_around_probability,
 )
-from simulation import ATCSimulation
+from simulation import ATCSimulation, GATE_HELD_INDEFINITELY_OFFSET
 from scenarios import ALL_TASKS, SCENARIO_TYPES, _make_task, generate_all_tasks
 from atc import ATCEnvironment
 
@@ -322,6 +322,29 @@ class TestToolValidation:
             result = sim.assign_gate(flight.id, "B1")
             assert not result["success"]
             assert "occupied" in result["error"]
+
+    def test_held_gate_message_survives_clock_advance(self):
+        """Regression: a gate held by the indefinite-hold sentinel must read
+        'until its departure pushes back' at ANY clock, not leak a bogus
+        'T+10004' once the clock advances past the hold step. The sentinel is
+        clock+OFFSET at hold time, so avail_at-clock shrinks as time passes."""
+        sim = _make_sim()
+        _activate_and_advance(sim, steps=2)
+        flight = next(
+            f for f in sim.flights.values()
+            if f.activated and f.phase in (FlightPhase.APPROACHING, FlightPhase.HOLDING)
+        )
+        gate = next(gid for gid, g in GATES.items() if g.max_adg.value >= flight.adg.value)
+        # Departure holds the gate indefinitely (sentinel, not a real time).
+        sim.gate_occupancy[gate] = ("DEP_FLIGHT", sim.clock + GATE_HELD_INDEFINITELY_OFFSET)
+        # Move the clock well past the hold step -- this is where the old
+        # exact-offset check broke and leaked "T+...". (Bump the clock directly
+        # so the test flight keeps its phase.)
+        sim.clock += 60
+        result = sim.assign_gate(flight.id, gate)
+        assert not result["success"]
+        assert "pushes back" in result["error"], result["error"]
+        assert "T+" not in result["error"], f"sentinel leaked a T+ timestamp: {result['error']}"
 
     def test_hold_flight_valid(self):
         sim = _make_sim()
