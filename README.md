@@ -4,7 +4,7 @@
 
 ## Description
 
-An air traffic control simulation where an agent manages arrivals, departures, gate assignments, holding patterns, diversions, and runway configurations during weather disruptions at a realistic hub airport (Metro Hub International, inspired by JFK). The environment features a huge combinatorial action space, hard safety constraints, stochastic weather and go-arounds, and multi-objective rewards spanning throughput, delay reduction, fuel efficiency, passenger connections, and safety margins.
+An air traffic control simulation where an agent manages arrivals, departures, gate assignments, holding patterns, diversions, and runway configurations during weather disruptions at a realistic hub airport (Metro Hub International, inspired by JFK). The environment features a large combinatorial action space, hard safety constraints, stochastic weather and go-arounds, and multi-objective rewards spanning throughput, delay reduction, fuel efficiency, passenger connections, and safety margins.
 
 Note: this is a synthetic environment that is majority AI-generated; please test thoroughly before using in an RL pipeline.
 
@@ -23,11 +23,11 @@ No additional compute requirements.
 
 ## License
 
-MIT
+[MIT](https://opensource.org/licenses/MIT).
 
 ## Tasks
 
-30 total tasks across 10 scenario types:
+There are 20 tasks in the `train` split and 10 in `test`, across 10 scenario types:
 
 | Scenario | Description | Train | Test |
 |----------|------------|-------|------|
@@ -48,7 +48,7 @@ Each task runs for 48 time steps of 5 minutes each (4 hours of simulated operati
 
 Dense per-step rewards on each `advance_time()` call that **sum exactly to the final episode score in [-1, 1]**.
 
-The per-step reward is a telescoping decomposition of the score: each step returns the change in the episode score (the "score if the shift ended now"), so individual step rewards may be negative, but summing every step reward over a rollout yields exactly the final score at the point the rollout stopped — even if it never reached a terminal state. This is potential-based reward shaping, so the dense signal is policy-invariant relative to the sparse final score, and there is no separate terminal reward to double-count. The `end_shift()` / final-step emissions are the last delta, not a repeated full score.
+The per-step reward is a telescoping decomposition of the score: each step returns the change in the episode score (the "score if the shift ended now"), so individual step rewards may be negative, but summing every step reward over a rollout yields exactly the final score at the point the rollout stopped, even if it never reached a terminal state. This is potential-based reward shaping, so the dense signal is policy-invariant relative to the sparse final score, and there is no separate terminal reward to double-count. The `end_shift()` / final-step emissions are the last delta, not a repeated full score.
 
 **Final score** is one credit (throughput) minus four penalties (delay, connections, fuel, safety), each a fraction in `[0, 1]` anchored at 0 for the empty state. The score lives in `[-1, 1]`: empty/neutral = 0, a perfect shift = +1, a do-nothing or disaster shift = -1.
 
@@ -74,7 +74,7 @@ No external data files. Flight schedules and weather timelines are generated pro
 
 ## Tools
 
-8 tools available to the agent:
+9 tools available to the agent:
 
 | Tool | Description |
 |------|-------------|
@@ -92,13 +92,9 @@ No external data files. Flight schedules and weather timelines are generated pro
 
 Multi-turn, open-ended within a 48-step window. The agent makes multiple tool calls per step (view status, sequence flights, assign gates) before advancing time. A typical episode involves 48 `advance_time()` calls plus action calls per step.
 
-## Environment Difficulty
-
-[To be determined after baseline evaluation]
-
 ## Other Environment Requirements
 
-- OpenAI API key required for `test_agent.py` (the environment itself requires no external API keys)
+The environment needs no secrets. Only the example script `test_agent.py` uses an OpenAI API key, for the agent model it drives.
 
 ## Safety
 
@@ -124,15 +120,16 @@ All aviation parameters are sourced from FAA, ICAO, IATA, and manufacturer opera
 | Passenger counts | 76–525 pax | Manufacturer 2-class configuration data |
 | Fuel critical threshold | 15 min | Simulation mechanic (FAA 14 CFR 91.167 requires 45 min IFR reserve) |
 
-**Simplifications**: Time-based wake separation (real ATC uses distance-based radar); discrete 5-minute steps; A380 holding fuel rate (100 kg/min) is conservative vs. cruise (~200 kg/min); JFK slot limit of 81 ops/hr (14 CFR 93 Subpart K) not enforced — simulation uses physical runway capacity.
+**Simplifications**: Time-based wake separation (real ATC uses distance-based radar); discrete 5-minute steps; A380 holding fuel rate (100 kg/min) is conservative vs. cruise (~200 kg/min); JFK slot limit of 81 ops/hr (14 CFR 93 Subpart K) not enforced; the simulation uses physical runway capacity.
 
 ## Citations
 
 ```bibtex
 @dataset{GRATC,
-  author = {General Reasoning Inc. Team},
-  title = {ATC: Air Traffic Control Environment for OpenReward},
-  year = {2025},
+  author    = {General Reasoning Inc. Team},
+  title     = {ATC},
+  year      = {2026},
   publisher = {OpenReward},
+  url       = {https://openreward.ai/GeneralReasoning/ATC}
 }
 ```
